@@ -104,6 +104,21 @@ async function main() {
   assert(!opens.some((row) => row.id === orphanId), 'un turno sin estación no es una caja del local');
   assert(!getActiveCajaById(''), 'un turno sin estación no es una caja abierta');
 
+  const settingsAgain = JSON.parse(queryOne("SELECT value FROM app_settings WHERE key = 'settings'").value);
+  settingsAgain.cajas = [
+    ...(settingsAgain.cajas || []),
+    { id: 'caja-b', name: 'Segunda caja', active: 1 },
+  ];
+  runSql("UPDATE app_settings SET value = ? WHERE key = 'settings'", [JSON.stringify(settingsAgain)]);
+  const ghostId = uuidv4();
+  runSql(
+    'INSERT INTO cash_registers (id, user_id, restaurant_id, opening_amount, caja_station_id) VALUES (?, ?, ?, 0, ?)',
+    [ghostId, 'usuario-que-ya-no-existe', restaurantId, 'caja-b'],
+  );
+  const opensWithGhost = getOpenRegistersOnActiveStations();
+  assert(opensWithGhost.some((row) => row.id === ghostId), 'el monitoreo ve el turno aunque el cajero ya no exista');
+  assert(opensWithGhost.some((row) => row.id === openId), 'el turno de la otra caja sigue visible');
+
   console.log('caja-dia-check: ok');
 }
 

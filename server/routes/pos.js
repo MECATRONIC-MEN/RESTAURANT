@@ -392,19 +392,18 @@ router.get('/caja-stations', authenticateToken, requireRole('admin', 'cajero'), 
     const sid = String(row?.caja_station_id || '').trim();
     stations = sid ? stations.filter((s) => s.id === sid) : [];
   }
-  const opens = queryAll(
-    `SELECT cr.id, cr.user_id, cr.caja_station_id, cr.opened_at, u.full_name as cajero_name
-     FROM cash_registers cr
-     LEFT JOIN users u ON u.id = cr.user_id
-     WHERE cr.closed_at IS NULL
-     ORDER BY datetime(cr.opened_at) DESC`
+  const bySid = new Map(
+    getOpenRegistersOnActiveStations().map((row) => [
+      String(row.caja_station_id || '').trim(),
+      {
+        id: row.id,
+        user_id: row.user_id,
+        caja_station_id: row.caja_station_id,
+        opened_at: row.opened_at,
+        cajero_name: row.user_name || '',
+      },
+    ]),
   );
-  const bySid = new Map();
-  (opens || []).forEach((o) => {
-    const k = String(o.caja_station_id || '').trim();
-    if (!k || bySid.has(k)) return;
-    bySid.set(k, o);
-  });
   res.json({
     stations: stations.map((s) => ({
       id: s.id,

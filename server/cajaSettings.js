@@ -48,17 +48,25 @@ function getOpenRegistersOnActiveStations() {
   const opens = queryAll(
     `SELECT cr.id, cr.opened_at, cr.user_id, cr.caja_station_id, u.full_name AS user_name
      FROM cash_registers cr
-     JOIN users u ON u.id = cr.user_id
+     LEFT JOIN users u ON u.id = cr.user_id
      WHERE cr.closed_at IS NULL
-     ORDER BY datetime(cr.opened_at) ASC`
+     ORDER BY datetime(cr.opened_at) DESC`
   );
 
-  return (opens || [])
-    .filter((r) => activeIds.has(String(r.caja_station_id || '').trim()))
-    .map((r) => ({
-      ...r,
-      station_name: stationNameById[String(r.caja_station_id || '').trim()] || 'Caja',
-    }));
+  const seen = new Set();
+  const out = [];
+  for (const row of opens || []) {
+    const sid = String(row.caja_station_id || '').trim();
+    if (!activeIds.has(sid) || seen.has(sid)) continue;
+    seen.add(sid);
+    out.push({
+      ...row,
+      caja_station_id: sid,
+      user_name: row.user_name || '',
+      station_name: stationNameById[sid] || 'Caja',
+    });
+  }
+  return out;
 }
 
 module.exports = {

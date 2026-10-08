@@ -432,29 +432,40 @@ export default function Escritorio() {
   const loadLiveDash = useCallback(async () => {
     setLiveDashLoading(true);
     try {
-      const d = await api.get('/reports/dashboard');
+      const d = await api.get('/reports/dashboard', { skipOffline: true });
       setLiveDash(d);
       setLiveDashError('');
     } catch (err) {
       const msg = String(err?.message || '').trim() || 'No se pudo cargar el monitoreo en vivo';
       try {
-        const op = await api.get('/reports/operational-alerts');
+        const op = await api.get('/reports/operational-alerts', { skipOffline: true });
+        const opens = Array.isArray(op.openRegisters) ? op.openRegisters : [];
         setLiveDash({
           operationalSummary: op.summary,
           operationalAlerts: op.alerts,
           insightToday: op.insightToday,
           generated_at: op.generated_at,
           activeOrders: op.summary?.activeOrders ?? 0,
-          tablesWithActiveOrders: op.summary?.tablesWithActiveOrders ?? 0,
-          deliveryActiveCount: op.summary?.deliveryActiveCount ?? 0,
-          inKitchenCount: op.summary?.inKitchenCount ?? 0,
-          registerOpen: op.summary?.registerOpen ?? false,
+          tablesWithActiveOrders: op.tablesWithActiveOrders ?? op.summary?.tablesWithActiveOrders ?? 0,
+          deliveryActiveCount: op.deliveryActiveCount ?? op.summary?.deliveryActiveCount ?? 0,
+          inKitchenCount: op.inKitchenCount ?? op.summary?.inKitchenCount ?? 0,
+          registerOpen: Boolean(op.summary?.registerOpen || opens.length || op.registerOpen?.id),
           deliveryEnabled: op.deliveryEnabled,
-          openRegisters: [],
-          registerOpenSummary: null,
+          openRegisters: opens,
+          registerOpenSummary: op.registerOpen || null,
           lowStock: [],
+          lowStockCount: Number(op.lowStockCount ?? op.summary?.lowStockCount ?? 0),
           liveSales: null,
-          liveSalesByRegister: [],
+          liveSalesByRegister: opens.map((reg) => ({
+            register_id: reg.id,
+            caja_station_id: reg.caja_station_id,
+            station_name: reg.station_name,
+            user_name: reg.user_name,
+            opened_at: reg.opened_at,
+            register_open: true,
+            total: 0,
+            count: 0,
+          })),
           today: null,
         });
         setLiveDashError('');
@@ -489,7 +500,7 @@ export default function Escritorio() {
 
   const loadData = async () => {
     try {
-      const allOrders = await api.get('/orders');
+      const allOrders = await api.get('/orders', { skipOffline: true });
       setOrders(allOrders);
     } catch (err) {
       console.error(err);
@@ -510,7 +521,7 @@ export default function Escritorio() {
   useEffect(() => {
     const loadCajaStations = () => {
       api
-        .get('/pos/caja-stations')
+        .get('/pos/caja-stations', { skipOffline: true })
         .then((res) => setCajaStations(Array.isArray(res?.stations) ? res.stations : []))
         .catch(() => setCajaStations([]));
     };
@@ -891,6 +902,21 @@ export default function Escritorio() {
     () => (Array.isArray(cajaStations) ? cajaStations : []).filter((s) => s && (s.active !== false && s.active !== 0)),
     [cajaStations]
   );
+  const openCajaStations = useMemo(
+    () => activeCajaStations.filter((s) => String(s?.open_register?.id || '').trim()),
+    [activeCajaStations],
+  );
+  const monitorOpenCount = Math.max(
+    openCajaStations.length,
+    Array.isArray(liveDash?.openRegisters) ? liveDash.openRegisters.length : 0,
+  );
+  const monitorRegisterOpen = monitorOpenCount > 0 || Boolean(liveDash?.registerOpen);
+  const lowStockMonitorCount = Number(
+    liveDash?.lowStockCount
+    ?? liveDash?.operationalSummary?.lowStockCount
+    ?? liveDash?.lowStock?.length
+    ?? 0,
+  );
   const liveSalesByStationId = useMemo(() => {
     const map = {};
     for (const row of liveDash?.liveSalesByRegister || []) {
@@ -1049,14 +1075,14 @@ export default function Escritorio() {
           {liveDash ? (
             <span
               className={`text-xs font-medium px-2 py-1 rounded-lg border ${
-                liveDash.registerOpen ? 'ui-live-badge-open' : 'ui-live-badge-closed'
+                monitorRegisterOpen ? 'ui-live-badge-open' : 'ui-live-badge-closed'
               }`}
             >
-              {liveDash.registerOpen
-                ? (liveDash.openRegisters?.length || 0) > 1
-                  ? `${liveDash.openRegisters.length} cajas abiertas`
-                  : liveDash.registerOpenSummary?.station_name
-                    ? `Caja abierta · ${liveDash.registerOpenSummary.station_name}`
+              {monitorRegisterOpen
+                ? monitorOpenCount > 1
+                  ? `${monitorOpenCount} cajas abiertas`
+                  : (openCajaStations[0]?.name || liveDash.registerOpenSummary?.station_name)
+                    ? `Caja abierta · ${openCajaStations[0]?.name || liveDash.registerOpenSummary.station_name}`
                     : 'Caja abierta'
                 : 'Sin caja abierta'}
             </span>
@@ -1089,16 +1115,22 @@ export default function Escritorio() {
             ).map((station) => {
               const sid = String(station.id || '').trim();
               const perReg = sid && sid !== '_default' ? liveSalesByStationId[sid] : null;
+              const stationShift = sid && sid !== '_default' && station?.open_register?.id
+                ? station.open_register
+                : null;
               const openReg =
                 sid && sid !== '_default'
-                  ? (liveDash.openRegisters || []).find(
+                  ? (stationShift || (liveDash.openRegisters || []).find(
                       (r) => String(r?.caja_station_id || '').trim() === sid
-                    )
+                    ))
                   : liveDash.registerOpen
                     ? liveDash.registerOpenSummary
                     : null;
               const isOpen = Boolean(
-                openReg || perReg?.register_open || (sid === '_default' && liveDash.registerOpen),
+                stationShift
+                || openReg
+                || perReg?.register_open
+                || (sid === '_default' && monitorRegisterOpen),
               );
               const total = !isOpen
                 ? 0
@@ -1115,7 +1147,7 @@ export default function Escritorio() {
                     ? Number(liveDash.liveSales?.count ?? 0)
                     : 0;
               const stationName = station.name || perReg?.station_name || openReg?.station_name || 'Caja';
-              const cashier = perReg?.user_name || openReg?.user_name || '';
+              const cashier = stationShift?.cajero_name || perReg?.user_name || openReg?.user_name || openReg?.cajero_name || '';
               return (
                 <button
                   key={sid || stationName}
@@ -1211,8 +1243,8 @@ export default function Escritorio() {
               onClick={() => navigate('/admin/almacen')}
               className="rounded-lg border border-[color:var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-left hover:bg-[var(--ui-sidebar-hover)] transition-colors"
             >
-              <p className="text-[10px] uppercase tracking-wide text-[var(--ui-muted)]">Stock ≤ 10</p>
-              <p className="text-lg font-bold text-[var(--ui-body-text)] tabular-nums mt-1">{liveDash.lowStock?.length ?? 0}</p>
+              <p className="text-[10px] uppercase tracking-wide text-[var(--ui-muted)]">Stock bajo</p>
+              <p className="text-lg font-bold text-[var(--ui-body-text)] tabular-nums mt-1">{lowStockMonitorCount}</p>
               <p className="text-[11px] text-[var(--ui-muted)]">Inventario</p>
               <p className="text-[11px] font-medium text-[var(--ui-accent-muted)] mt-0.5">Ir a Control De Recursos</p>
             </button>

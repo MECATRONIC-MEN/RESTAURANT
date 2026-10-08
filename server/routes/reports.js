@@ -752,9 +752,22 @@ router.get('/dashboard', authenticateToken, requireRole('admin', 'cajero', 'mast
     } catch (err) {
       console.warn('[reports] financeMonthToDateSnapshot:', err.message || err);
     }
-    const liveSales = buildLiveSalesPanel(op.registerOpen);
+    let liveSales = null;
+    try {
+      liveSales = buildLiveSalesPanel(op.registerOpen);
+    } catch (err) {
+      console.warn('[reports] buildLiveSalesPanel:', err.message || err);
+    }
     const liveSalesByRegister = (op.openRegisters || []).map((reg) => {
-      const session = queryRegisterSessionSales(reg);
+      let total = 0;
+      let count = 0;
+      try {
+        const session = queryRegisterSessionSales(reg);
+        total = Number(session.total_sales || 0);
+        count = Number(session.order_count || 0);
+      } catch (err) {
+        console.warn('[reports] ventas del turno en vivo:', err.message || err);
+      }
       return {
         register_id: reg.id,
         caja_station_id: String(reg.caja_station_id || '').trim(),
@@ -762,8 +775,8 @@ router.get('/dashboard', authenticateToken, requireRole('admin', 'cajero', 'mast
         user_name: reg.user_name || '',
         opened_at: reg.opened_at,
         register_open: true,
-        total: Number(session.total_sales || 0),
-        count: Number(session.order_count || 0),
+        total,
+        count,
       };
     });
 
@@ -776,6 +789,7 @@ router.get('/dashboard', authenticateToken, requireRole('admin', 'cajero', 'mast
       topProducts,
       recentOrders,
       lowStock: op.lowStock,
+      lowStockCount: Number(op.summary?.lowStockCount || 0),
       paymentMethods,
       tablesWithActiveOrders: op.tablesWithActiveOrders,
       deliveryActiveCount: op.deliveryActiveCount,
@@ -807,6 +821,12 @@ router.get('/operational-alerts', authenticateToken, requireRole('admin', 'cajer
       generated_at: op.generated_at,
       businessIntel: op.businessIntel,
       deliveryEnabled: op.deliveryEnabled,
+      openRegisters: op.openRegisters || [],
+      registerOpen: op.registerOpen || null,
+      tablesWithActiveOrders: op.tablesWithActiveOrders,
+      deliveryActiveCount: op.deliveryActiveCount,
+      inKitchenCount: op.inKitchenCount,
+      lowStockCount: Number(op.summary?.lowStockCount || 0),
     });
   } catch (err) {
     console.error('[reports] GET /operational-alerts:', err.message || err);
