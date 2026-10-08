@@ -22,7 +22,7 @@ function getCashCloseRecipient() {
      WHERE lower(trim(coalesce(role, ''))) = 'admin'
        AND COALESCE(is_active, 1) = 1
        AND trim(coalesce(email, '')) != ''
-     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+     ORDER BY datetime(created_at) DESC
      LIMIT 1`
   );
   if (adminRow?.email) {
@@ -50,6 +50,8 @@ function buildCashCloseContent({
   closedByName,
   toEmail,
   recipientName,
+  stationName = '',
+  responsibleName = '',
 }) {
   const restaurant = queryOne('SELECT name FROM restaurants LIMIT 1');
   const restaurantName = restaurant?.name || 'Resto-FADEY';
@@ -57,8 +59,9 @@ function buildCashCloseContent({
   const subject = `[Caja] Cierre registrado - ${restaurantName}`;
   const messageLines = [
     `Restaurante: ${restaurantName}`,
-    `Caja: ${register.id}`,
-    `Cajero: ${closedByName || '-'}`,
+    `Caja: ${stationName || register.caja_station_id || register.id}`,
+    `Responsable: ${responsibleName || '-'}`,
+    `Cerró: ${closedByName || '-'}`,
     `Apertura: ${register.opened_at || '-'}`,
     `Cierre: ${closeDate}`,
     `Ventas: ${Number(sales.total_sales || 0)}`,
@@ -252,5 +255,6 @@ async function sendCashCloseNotification(params) {
 module.exports = {
   getCashCloseRecipient,
   sendCashCloseNotification,
+  buildCashCloseContent,
   smtpConfigured,
 };

@@ -18,6 +18,7 @@ const {
   ensureOpenWorkSession,
 } = require('../services/workSessionService');
 const { cajaSubPermissionKey, CAJA_USER_OPT_IN_SUBS } = require('../planModuleCatalog');
+const { buildWorkModulePermissions } = require('../utils/staffWorkPermissions');
 const { getRawUserPermissionsJson } = require('../lib/cajaPermissions');
 const { purgeUserFromSystem } = require('../utils/purgeUserFromSystem');
 const { emitStaffDataUpdate } = require('../socketBroadcast');
@@ -281,25 +282,9 @@ router.post('/', authenticateToken, requireRole('admin'), (req, res) => {
     const permissionsObj =
       isMaster && finalRole === 'admin'
         ? createFullPermissions()
-        : createEmptyPermissions();
-    if (prodNorm.role === 'produccion' || ['produccion', 'cocina', 'bar'].includes(String(insertFields.role))) {
-      const area = String(prodNorm.production_area_id || insertFields.production_area_id || '').trim().toLowerCase();
-      const roleLc = String(insertFields.role || prodNorm.role || '').toLowerCase();
-      permissionsObj.produccion = false;
-      permissionsObj.cocina = false;
-      permissionsObj.bar = false;
-      if (roleLc === 'bar' || area === 'bar') {
-        permissionsObj.bar = true;
-      } else if (roleLc === 'cocina' || area === 'cocina' || !area) {
-        permissionsObj.cocina = true;
-      } else {
-        // Área custom: acceso por área vinculada (sin módulo «Producción» en UI).
-        permissionsObj.produccion = true;
-      }
-    }
-    if (finalRole === 'mozo') {
-      permissionsObj.mesas = true;
-    }
+        : (finalRole === 'admin'
+          ? createEmptyPermissions()
+          : buildWorkModulePermissions(insertFields.role, insertFields.production_area_id));
     runSql(
       'INSERT INTO user_permissions (id, user_id, permissions) VALUES (?, ?, ?)',
       [uuidv4(), id, JSON.stringify(permissionsObj)]
@@ -441,6 +426,22 @@ router.put('/:id', authenticateToken, requireRole('admin'), (req, res) => {
         `UPDATE users SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
         [...cols.map((c) => payrollPatch[c]), req.params.id]
       );
+    }
+
+    const nextRole = String(setCols.role || persistedRole || '').toLowerCase();
+    const prevRole = String(current.role || '').toLowerCase();
+    if (nextRole && nextRole !== 'admin' && nextRole !== prevRole) {
+      const existingPerms = queryOne('SELECT id, permissions FROM user_permissions WHERE user_id = ?', [req.params.id]);
+      let parsedPerms = {};
+      try { parsedPerms = JSON.parse(existingPerms?.permissions || '{}') || {}; } catch { parsedPerms = {}; }
+      const nextPerms = buildWorkModulePermissions(nextRole, prodNorm.production_area_id);
+      if (parsedPerms['caja:eliminar_liberar_mesa'] === true) nextPerms['caja:eliminar_liberar_mesa'] = true;
+      const permJson = JSON.stringify(nextPerms);
+      if (existingPerms?.id) {
+        runSql("UPDATE user_permissions SET permissions = ?, updated_at = datetime('now') WHERE user_id = ?", [permJson, req.params.id]);
+      } else {
+        runSql('INSERT INTO user_permissions (id, user_id, permissions) VALUES (?, ?, ?)', [uuidv4(), req.params.id, permJson]);
+      }
     }
 
     const updated = listUsersRows().find((u) => u.id === req.params.id) || queryOne(

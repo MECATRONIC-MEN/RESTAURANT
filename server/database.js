@@ -3387,18 +3387,11 @@ function ensureProductionStaffPermissions(userId) {
     if (!row) return;
     let perms = {};
     try { perms = JSON.parse(row.permissions || '{}') || {}; } catch { perms = {}; }
-    const roleLc = String(user?.role || '').toLowerCase();
-    const area = String(user?.production_area_id || '').trim().toLowerCase();
-    perms.produccion = false;
-    perms.cocina = false;
-    perms.bar = false;
-    if (roleLc === 'bar' || area === 'bar') {
-      perms.bar = true;
-    } else if (roleLc === 'cocina' || area === 'cocina' || !area) {
-      perms.cocina = true;
-    } else {
-      perms.produccion = true;
-    }
+    const { buildWorkModulePermissions } = require('./utils/staffWorkPermissions');
+    const next = buildWorkModulePermissions(user?.role, user?.production_area_id);
+    perms.produccion = next.produccion;
+    perms.cocina = next.cocina;
+    perms.bar = next.bar;
     runSql('UPDATE user_permissions SET permissions = ? WHERE user_id = ?', [JSON.stringify(perms), userId]);
   } catch (err) {
     console.warn('[users] permisos producción:', err.message || err);

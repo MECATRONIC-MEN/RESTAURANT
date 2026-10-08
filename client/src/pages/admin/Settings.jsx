@@ -63,21 +63,21 @@ import SettingsRegionalPanel from '../../components/settings/SettingsRegionalPan
 import SettingsSectionInsights from '../../components/settings/SettingsSectionInsights';
 
 const ALL_MODULES = [
-  { id: 'escritorio', label: 'Escritorio', icon: MdDashboard, defaultRoles: ['admin', 'cajero'] },
-  { id: 'ventas', label: 'Ventas', icon: MdAttachMoney, defaultRoles: ['admin', 'cajero'] },
+  { id: 'escritorio', label: 'Escritorio', icon: MdDashboard, defaultRoles: ['admin'] },
+  { id: 'ventas', label: 'Ventas', icon: MdAttachMoney, defaultRoles: ['admin'] },
   { id: 'caja', label: 'Caja', icon: MdPointOfSale, defaultRoles: ['admin', 'cajero'] },
   { id: 'mesas', label: 'Mesas', icon: MdTableBar, defaultRoles: ['admin', 'mozo'] },
   { id: 'cocina', label: 'Cocina', icon: MdKitchen, defaultRoles: ['admin'] },
   { id: 'bar', label: 'Bar', icon: MdLocalBar, defaultRoles: ['admin'] },
-  { id: 'reservas', label: 'Reservas', icon: MdEventSeat, defaultRoles: ['admin', 'cajero', 'mozo'] },
-  { id: 'auto_pedido', label: 'Auto pedido', icon: MdTouchApp, defaultRoles: ['admin', 'mozo'] },
-  { id: 'creditos', label: 'Créditos', icon: MdCreditCard, defaultRoles: ['admin', 'cajero'] },
-  { id: 'clientes', label: 'Clientes', icon: MdPeopleAlt, defaultRoles: ['admin', 'cajero'] },
+  { id: 'reservas', label: 'Reservas', icon: MdEventSeat, defaultRoles: ['admin'] },
+  { id: 'auto_pedido', label: 'Auto pedido', icon: MdTouchApp, defaultRoles: ['admin'] },
+  { id: 'creditos', label: 'Créditos', icon: MdCreditCard, defaultRoles: ['admin'] },
+  { id: 'clientes', label: 'Clientes', icon: MdPeopleAlt, defaultRoles: ['admin'] },
   { id: 'productos', label: 'Productos', icon: MdRestaurantMenu, defaultRoles: ['admin'] },
   { id: 'ofertas', label: 'Promociones', icon: MdLocalOffer, defaultRoles: ['admin'] },
   { id: 'almacen', label: 'Control De Recursos', icon: MdWarehouse, defaultRoles: ['admin'] },
-  { id: 'delivery', label: 'Delivery', icon: MdDeliveryDining, defaultRoles: ['admin', 'cajero', 'mozo'] },
-  { id: 'informes', label: 'Informes', icon: MdAssessment, defaultRoles: ['admin', 'cajero'] },
+  { id: 'delivery', label: 'Delivery', icon: MdDeliveryDining, defaultRoles: ['admin', 'delivery'] },
+  { id: 'informes', label: 'Informes', icon: MdAssessment, defaultRoles: ['admin'] },
   { id: 'indicadores', label: 'Indicadores', icon: MdInsights, defaultRoles: ['admin'] },
   { id: 'fidelizacion', label: 'Fidelización', icon: MdStars, defaultRoles: ['admin'] },
   { id: 'mi_restaurant', label: 'Mi empresa', icon: MdStorefront, defaultRoles: ['admin'] },
@@ -91,7 +91,7 @@ const CAJA_EXTRA_PERMISSIONS = [
 
 const ROLES = {
   admin: { label: 'Administrador', icon: MdAdminPanelSettings, color: UI_BADGE.purple, desc: 'Acceso completo al sistema' },
-  cajero: { label: 'Cajero', icon: MdPointOfSale, color: UI_BADGE.blue, desc: 'Caja, cobros e informes' },
+  cajero: { label: 'Cajero', icon: MdPointOfSale, color: UI_BADGE.blue, desc: 'Solo su caja' },
   mozo: { label: 'Mozo', icon: MdRoomService, color: UI_BADGE.emerald, desc: 'Mesas y pedidos de su caja' },
   produccion: { label: 'Producción', icon: MdKitchen, color: UI_BADGE.amber, desc: 'Se vincula al área desde Áreas de producción' },
   delivery: { label: 'Delivery', icon: MdDeliveryDining, color: UI_BADGE.sky, desc: 'Reparto y entregas' },

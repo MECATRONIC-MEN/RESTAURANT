@@ -31,7 +31,7 @@ const {
 } = require('../utils/salesAccountGrouping');
 const { sendCashCloseNotification, getCashCloseRecipient } = require('../services/cashCloseNotifyService');
 const { getOrderChargeBase } = require('../utils/orderChargeBase');
-const { getOpenRegisterForUser } = require('../utils/openCashRegister');
+const { getOpenRegisterForUser, openStationShift, closeOtherShiftsOfStation, resolveOpenStationForActor } = require('../utils/openCashRegister');
 const { materializePartialItemQuantitiesTx } = require('../services/orderItemQuantitySplit');
 
 const router = express.Router();
@@ -351,6 +351,10 @@ function resolvePosRegister(req) {
 function resolveCashFlowRegister(req) {
   const register = resolvePosRegister(req);
   const rid = pickRegisterId(req);
+  const role = String(req.user?.role || '').toLowerCase();
+  if (role === 'cajero' && rid && register && String(register.id) !== rid) {
+    return { register: null, error: 'Solo puede registrar movimientos en su caja' };
+  }
   if (rid && (!register || String(register.id) !== rid)) {
     return {
       register: null,
@@ -412,57 +416,27 @@ router.post('/open-register', authenticateToken, requireRole('admin', 'cajero'),
 
   const dbUser = queryOne('SELECT role, caja_station_id FROM users WHERE id = ?', [req.user.id]);
   const role = String(dbUser?.role || req.user.role || '').toLowerCase();
-  let stationId = '';
-  if (role === 'cajero') {
-    stationId = String(dbUser?.caja_station_id || '').trim();
-    if (!stationId) {
-      return res.status(400).json({ error: 'Su usuario no tiene una caja asignada. Configúrelo en Usuarios.' });
-    }
-  } else if (role === 'admin') {
-    stationId = String(req.body?.caja_station_id || '').trim();
-    if (!stationId) return res.status(400).json({ error: 'Seleccione la caja a abrir' });
-    if (!getActiveCajaById(stationId)) {
-      return res.status(400).json({ error: 'La caja no existe o está inactiva' });
-    }
-  } else {
-    return res.status(403).json({ error: 'Rol no autorizado para abrir caja' });
-  }
-
-  if (role !== 'admin') {
-    const existing = getOpenRegisterForUser({ id: req.user.id, role });
-    if (existing) {
-      if (String(existing.user_id) !== String(req.user.id)) {
-        return res.json({ ...existing, already_open: true });
-      }
-      return res.status(400).json({ error: 'Ya tienes una caja abierta', register: existing });
-    }
-  } else {
-    const existing = getOpenRegister(req.user.id);
-    if (existing) {
-      return res.status(400).json({ error: 'Cierre su turno de caja actual antes de abrir otro', register: existing });
-    }
-  }
-
-  const clash = queryOne(
-    `SELECT cr.id, u.full_name as cajero_name FROM cash_registers cr
-     JOIN users u ON u.id = cr.user_id
-     WHERE cr.closed_at IS NULL AND trim(coalesce(cr.caja_station_id, '')) = ?
-     LIMIT 1`,
-    [stationId]
-  );
-  if (clash?.id) {
-    return res.status(400).json({
-      error: `Esta caja ya tiene un turno abierto (${clash.cajero_name || 'otro usuario'})`,
-      register: clash,
-    });
-  }
+  const requested = String(req.body?.caja_station_id || '').trim();
+  const decision = resolveOpenStationForActor({
+    role,
+    assignedStationId: dbUser?.caja_station_id,
+    requestedStationId: requested,
+    isActiveStation: Boolean(requested && getActiveCajaById(requested)),
+  });
+  if (decision.error) return res.status(decision.status).json({ error: decision.error });
+  const stationId = decision.stationId;
 
   const restaurant = queryOne('SELECT id FROM restaurants LIMIT 1');
-  const id = uuidv4();
-  runSql(
-    'INSERT INTO cash_registers (id, user_id, restaurant_id, opening_amount, caja_station_id) VALUES (?, ?, ?, ?, ?)',
-    [id, req.user.id, restaurant?.id, Number(opening_amount), stationId]
-  );
+  const opened = openStationShift({
+    stationId,
+    openerUserId: req.user.id,
+    openingAmount: Number(opening_amount),
+    restaurantId: restaurant?.id,
+  });
+  if (opened.already_open) {
+    return res.json({ ...opened.register, already_open: true });
+  }
+  const id = opened.register.id;
   /** Nuevo turno de caja: la numeración de pedidos vuelve a empezar desde #1. */
   runSql('UPDATE order_sequence SET current_number = 0 WHERE id = 1');
   logAudit({
@@ -474,7 +448,7 @@ router.post('/open-register', authenticateToken, requireRole('admin', 'cajero'),
     details: { opening_amount: Number(opening_amount), caja_station_id: stationId },
   });
   const io = req.app.get('io');
-  if (io) io.emit('register-update', { action: 'open', registerId: id });
+  if (io) io.emit('register-update', { action: 'open', registerId: id, caja_station_id: stationId });
   res.status(201).json(queryOne('SELECT * FROM cash_registers WHERE id = ?', [id]));
 });
 
@@ -641,18 +615,7 @@ router.post('/close-register', authenticateToken, requireRole('admin', 'cajero')
   runSql("UPDATE cash_registers SET closed_at = datetime('now'), closing_amount = ?, total_sales = ?, total_cash = ?, total_yape = ?, total_plin = ?, total_card = ?, notes = ?, arqueo_data = ?, business_date = ? WHERE id = ?",
     [countedCash, sales.total_sales, sales.total_cash, sales.total_yape, sales.total_plin, sales.total_card, closingNotesText || '', arqueoData, businessDate, register.id]);
   const stationId = String(register.caja_station_id || '').trim();
-  runSql(
-    `UPDATE cash_registers
-     SET closed_at = datetime('now'),
-         notes = CASE WHEN trim(coalesce(notes, '')) = '' THEN 'Cierre automático de turno duplicado' ELSE notes END
-     WHERE closed_at IS NULL
-       AND id != ?
-       AND (
-         user_id = ?
-         OR (? != '' AND trim(coalesce(caja_station_id, '')) = ?)
-       )`,
-    [register.id, register.user_id, stationId, stationId],
-  );
+  closeOtherShiftsOfStation(register.id, stationId);
   /** Cierre de caja: reinicio de numeración para el próximo turno / apertura. */
   runSql('UPDATE order_sequence SET current_number = 0 WHERE id = 1');
   logAudit({
@@ -667,10 +630,12 @@ router.post('/close-register', authenticateToken, requireRole('admin', 'cajero')
   const closedRegister = queryOne('SELECT * FROM cash_registers WHERE id = ?', [register.id]);
 
   const io = req.app.get('io');
-  if (io) io.emit('register-update', { action: 'close', registerId: register.id });
+  if (io) io.emit('register-update', { action: 'close', registerId: register.id, caja_station_id: stationId });
 
   res.json(closedRegister);
 
+  const stationRow = listCajasWithIds().find((c) => c.id === stationId);
+  const responsible = queryOne('SELECT full_name FROM users WHERE id = ?', [register.user_id]);
   sendCashCloseNotification({
     register: closedRegister || register,
     sales,
@@ -680,6 +645,8 @@ router.post('/close-register', authenticateToken, requireRole('admin', 'cajero')
     difference: diff,
     notes: closingNotesText || '',
     closedByName: req.user.full_name || req.user.username || '',
+    stationName: stationRow?.name || stationId,
+    responsibleName: String(responsible?.full_name || '').trim(),
   }).catch((notifyErr) => {
     console.error('[close-register] aviso externo fallido:', notifyErr.message);
   });
@@ -708,6 +675,9 @@ router.post('/send-close-email', authenticateToken, requireRole('admin', 'cajero
 
   try {
     const { email } = getCashCloseRecipient();
+    const stationId = String(register.caja_station_id || '').trim();
+    const stationRow = listCajasWithIds().find((c) => c.id === stationId);
+    const responsible = queryOne('SELECT full_name FROM users WHERE id = ?', [register.user_id]);
     const result = await sendCashCloseNotification({
       register,
       sales,
@@ -717,7 +687,16 @@ router.post('/send-close-email', authenticateToken, requireRole('admin', 'cajero
       difference: diff,
       notes: String(arqueo?.observations || closingNotesText || '').trim(),
       closedByName: req.user.full_name || req.user.username || '',
+      stationName: stationRow?.name || stationId,
+      responsibleName: String(responsible?.full_name || '').trim(),
     });
+    if (result?.skipped) {
+      return res.json({
+        success: false,
+        skipped: true,
+        message: 'El aviso de cierre está desactivado. No se envió correo.',
+      });
+    }
     if (result?.warning) {
       return res.json({
         success: true,
@@ -1301,7 +1280,7 @@ router.get('/z-report', authenticateToken, requireRole('admin', 'cajero'), (req,
      FROM cash_registers cr
      LEFT JOIN users u ON u.id = cr.user_id
      WHERE cr.closed_at IS NOT NULL
-     ORDER BY cr.closed_at DESC
+     ORDER BY datetime(cr.closed_at) DESC, cr.rowid DESC
      LIMIT 1`
   );
   if (!register) return res.status(404).json({ error: 'No hay cierre Z disponible' });

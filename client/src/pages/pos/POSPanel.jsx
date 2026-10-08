@@ -1159,13 +1159,7 @@ export default function POSPanel() {
     });
   };
 
-  const resolveLiveRegister = (raw) => {
-    if (cajaLockedClosedRef.current) return null;
-    const live = liveOpenRegister(raw);
-    if (!live) return null;
-    if (closedRegisterIdsRef.current.has(String(live.id))) return null;
-    return live;
-  };
+  const resolveLiveRegister = (raw) => liveOpenRegister(raw);
   const [barAutoDismiss, setBarAutoDismiss] = useState(false);
   const [barAutoDismissMinutes, setBarAutoDismissMinutes] = useState(30);
   const [barSettingsLoaded, setBarSettingsLoaded] = useState(false);
@@ -1281,11 +1275,9 @@ export default function POSPanel() {
 
       if (gen !== loadDataGenRef.current) return;
 
-      const stationsList = filterStationsAfterClose(
-        Array.isArray(stationsResEarly?.stations) ? stationsResEarly.stations : [],
-      );
-      setCajaStations((prev) => (stationsList.length ? stationsList : filterStationsAfterClose(prev)));
-      if (posRole === 'admin' && !adminRid && stationsList.length === 1 && !cajaLockedClosedRef.current) {
+      const stationsList = Array.isArray(stationsResEarly?.stations) ? stationsResEarly.stations : [];
+      setCajaStations((prev) => (stationsList.length ? stationsList : prev));
+      if (posRole === 'admin' && !adminRid && stationsList.length === 1) {
         const onlyOpenId = String(stationsList[0]?.open_register?.id || '').trim();
         if (onlyOpenId) {
           adminRid = onlyOpenId;
@@ -1370,7 +1362,6 @@ export default function POSPanel() {
         register: statusRegister,
       });
       setRegister((prev) => {
-        if (cajaLockedClosedRef.current) return null;
         if (regResolved) return regResolved;
         if (regFetchFailed) return resolveLiveRegister(prev);
         return null;
@@ -1628,15 +1619,24 @@ export default function POSPanel() {
   useActiveInterval(pollPosData, 10000);
   useSocket('register-update', (payload) => {
     if (payload?.action === 'close') {
-      lockCajaClosed(payload.registerId);
-      loadDataGenRef.current += 1;
+      const closedId = String(payload.registerId || '').trim();
+      const closedStation = String(payload.caja_station_id || '').trim();
+      const role = posRoleOf(posUserRef.current);
+      const myStation = String(posUserRef.current?.caja_station_id || '').trim();
+      const myReg = String(registerIdRef.current || '').trim();
+      const adminReg = String(adminRegisterIdRef.current || '').trim();
+      const affectsMe = role === 'cajero'
+        ? Boolean((closedStation && closedStation === myStation) || (closedId && closedId === myReg))
+        : Boolean(closedId && adminReg && closedId === adminReg);
       invalidateGetCache(REGISTER_STATE_CACHE_PATHS);
-      setCajaStations((prev) => filterStationsAfterClose(prev));
-      setRegister(null);
-      setRegisterStatus({ is_open: false, register: null });
-      if (posRoleOf(posUserRef.current) === 'admin') {
-        persistAdminRegisterId('');
-        setAdminRegisterId('');
+      if (affectsMe) {
+        loadDataGenRef.current += 1;
+        setRegister(null);
+        setRegisterStatus({ is_open: false, register: null });
+        if (role === 'admin') {
+          persistAdminRegisterId('');
+          setAdminRegisterId('');
+        }
       }
     }
     void loadData();
@@ -1977,7 +1977,11 @@ export default function POSPanel() {
       setRegister(reg);
       setRegisterStatus({ is_open: true, register: { user_id: user?.id, cajero_name: user?.full_name, opened_at: reg.opened_at } });
       setOpeningAmount('');
-      toast.success(`Caja abierta con ${formatCurrency(amount)}`);
+      toast.success(
+        reg?.already_open
+          ? 'Esa caja ya estaba abierta: ingresaste al turno en curso'
+          : `Caja abierta con ${formatCurrency(amount)}`,
+      );
       await loadData({ adminRegisterOverride: reg.id });
     } catch (err) { toast.error(err.message); }
     finally { setWorkAreaLoading(false); }

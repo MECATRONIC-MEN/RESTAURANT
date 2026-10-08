@@ -64,6 +64,14 @@ export const QR_PRINT_FORMATS = [
     qr: { x: 0.333, y: 0.437, w: 0.331, h: 0.203 },
     logo: { x: 0.34, y: 0.028, w: 0.32, h: 0.132 },
   },
+  {
+    id: 'selva',
+    name: 'Selva',
+    src: '/qr-formats/selva.jpg',
+    logoShape: 'ellipse',
+    qr: { x: 0.326, y: 0.455, w: 0.346, h: 0.23 },
+    logo: { x: 0.27, y: 0.032, w: 0.46, h: 0.155 },
+  },
 ];
 
 export function qrPrintFormatBySrc(src) {

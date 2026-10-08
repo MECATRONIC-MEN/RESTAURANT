@@ -463,6 +463,15 @@ function logSqlitePersistenceWarnings() {
 async function start() {
   try {
     await initDatabase();
+    try {
+      const { ensureStaffWorkModulePermissions } = require('./utils/staffWorkPermissions');
+      const perms = ensureStaffWorkModulePermissions();
+      if (!perms.skipped && perms.updated) {
+        console.log(`[permisos] Personal alineado a su módulo de trabajo: ${perms.updated}`);
+      }
+    } catch (permErr) {
+      console.warn('[permisos] no se pudieron alinear los módulos de trabajo:', permErr.message || permErr);
+    }
   } catch (err) {
     console.error('[server] initDatabase no bloquea el arranque (maestro puede restaurar .db):', err.message || err);
   }
