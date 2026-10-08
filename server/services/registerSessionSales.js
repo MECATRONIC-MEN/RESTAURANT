@@ -43,22 +43,17 @@ function buildRegisterSalesSql(register) {
 
   if (id) {
     const params = [id, openedAt];
-    let legacyEnd = '';
+    let endSql = '';
     if (closedAt) {
-      legacyEnd = ` AND ${eventAtO} <= ?`;
+      endSql = ` AND ${eventAtO} <= ?`;
       params.push(closedAt);
     }
     return {
       sql: `SELECT ${selectCols}
             FROM orders o
             WHERE ${baseWhereO}
-              AND (
-                IFNULL(o.cash_register_id, '') = ?
-                OR (
-                  IFNULL(o.cash_register_id, '') = ''
-                  AND ${eventAtO} >= ?${legacyEnd}
-                )
-              )
+              AND IFNULL(o.cash_register_id, '') = ?
+              AND ${eventAtO} >= ?${endSql}
             ORDER BY ${eventAtO} ASC`,
       params,
     };
@@ -144,7 +139,7 @@ function queryRegisterSessionOrderRows(registerOrOpenedAt) {
   return queryAll(built.sql, built.params) || [];
 }
 
-/** Pedidos pagados del turno (preferir cash_register_id; legacy por fecha). */
+/** Pedidos pagados de este turno: solo su caja, desde la apertura hasta el cierre. */
 function queryRegisterSessionSales(registerOrOpenedAt) {
   return aggregatePaidOrders(queryRegisterSessionOrderRows(registerOrOpenedAt));
 }

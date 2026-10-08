@@ -1097,17 +1097,23 @@ export default function Escritorio() {
                   : liveDash.registerOpen
                     ? liveDash.registerOpenSummary
                     : null;
-              const isOpen = Boolean(perReg || openReg || (sid === '_default' && liveDash.registerOpen));
-              const total = perReg
-                ? Number(perReg.total || 0)
-                : sid === '_default'
-                  ? Number(liveDash.liveSales?.total ?? liveDash.today?.total ?? 0)
-                  : 0;
-              const count = perReg
-                ? Number(perReg.count || 0)
-                : sid === '_default'
-                  ? Number(liveDash.liveSales?.count ?? liveDash.today?.count ?? 0)
-                  : 0;
+              const isOpen = Boolean(
+                openReg || perReg?.register_open || (sid === '_default' && liveDash.registerOpen),
+              );
+              const total = !isOpen
+                ? 0
+                : perReg
+                  ? Number(perReg.total || 0)
+                  : sid === '_default'
+                    ? Number(liveDash.liveSales?.total ?? 0)
+                    : 0;
+              const count = !isOpen
+                ? 0
+                : perReg
+                  ? Number(perReg.count || 0)
+                  : sid === '_default'
+                    ? Number(liveDash.liveSales?.count ?? 0)
+                    : 0;
               const stationName = station.name || perReg?.station_name || openReg?.station_name || 'Caja';
               const cashier = perReg?.user_name || openReg?.user_name || '';
               return (

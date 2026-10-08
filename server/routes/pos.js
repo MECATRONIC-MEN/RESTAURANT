@@ -4,7 +4,7 @@ const { queryAll, queryOne, runSql, withTransaction, logAudit, ensureOrdersPayme
 const kardexInventory = require('../services/kardexInventoryService');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { assertPaymentMethodAllowed, normalizePaymentMethod, getPaymentMethodOptionsPayload, isPosTerminalEnabled, isCourtesyDiscountReason, COURTESY_PAYMENT_METHOD } = require('../businessRules');
-const { getActiveCajaById, listCajasWithIds } = require('../cajaSettings');
+const { getActiveCajaById, listCajasWithIds, getOpenRegistersOnActiveStations } = require('../cajaSettings');
 const { print } = require('../printing/printerService');
 const { getOrderWithItems } = require('../orderCreateService');
 const { emitInventoryUpdate, emitBillingDocumentUpdate, emitStaffDataUpdate } = require('../socketBroadcast');
@@ -328,20 +328,30 @@ function pickRegisterId(req) {
  * (no acepta register_id de la URL).
  * Admin: si envía register_id, opera esa sesión (cualquier usuario); si no, solo la suya propia.
  */
+/** Un turno solo opera caja si su estación sigue activa. Si no, el mapa y el monitoreo coinciden: no hay turno. */
+function onlyActiveStationRegister(register) {
+  if (!register) return null;
+  const sid = String(register.caja_station_id || '').trim();
+  if (!getActiveCajaById(sid)) return null;
+  return register;
+}
+
 function resolvePosRegister(req) {
   const user = req.user;
   const role = String(user?.role || '').toLowerCase();
   if (role === 'cajero') {
-    return getOpenRegisterForUser(user);
+    return onlyActiveStationRegister(getOpenRegisterForUser(user));
   }
   if (role === 'admin' || role === 'master_admin') {
     const rid = pickRegisterId(req);
     if (rid) {
-      return queryOne('SELECT * FROM cash_registers WHERE id = ? AND closed_at IS NULL', [rid]) || null;
+      return onlyActiveStationRegister(
+        queryOne('SELECT * FROM cash_registers WHERE id = ? AND closed_at IS NULL', [rid]) || null,
+      );
     }
-    return getOpenRegister(user.id) || null;
+    return onlyActiveStationRegister(getOpenRegister(user.id) || null);
   }
-  return getOpenRegister(user.id) || null;
+  return onlyActiveStationRegister(getOpenRegister(user.id) || null);
 }
 
 /**
@@ -1138,15 +1148,18 @@ router.get('/register-status', authenticateToken, requireRole('admin', 'cajero',
       [mozoCajaId]
     );
   } else {
-    openCount = queryOne('SELECT COUNT(*) as c FROM cash_registers WHERE closed_at IS NULL');
-    openRegister = queryOne(
-      `SELECT cr.id, cr.user_id, cr.opened_at, cr.caja_station_id, u.full_name as cajero_name
-       FROM cash_registers cr
-       JOIN users u ON u.id = cr.user_id
-       WHERE cr.closed_at IS NULL
-       ORDER BY datetime(cr.opened_at) DESC
-       LIMIT 1`
-    );
+    const opens = getOpenRegistersOnActiveStations();
+    openCount = { c: opens.length };
+    const first = opens[0] || null;
+    openRegister = first
+      ? {
+        id: first.id,
+        user_id: first.user_id,
+        opened_at: first.opened_at,
+        caja_station_id: first.caja_station_id,
+        cajero_name: first.user_name || '',
+      }
+      : null;
   }
   res.json({
     is_open: Number(openCount?.c || 0) > 0,

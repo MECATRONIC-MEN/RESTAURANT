@@ -761,6 +761,7 @@ router.get('/dashboard', authenticateToken, requireRole('admin', 'cajero', 'mast
         station_name: reg.station_name || 'Caja',
         user_name: reg.user_name || '',
         opened_at: reg.opened_at,
+        register_open: true,
         total: Number(session.total_sales || 0),
         count: Number(session.order_count || 0),
       };

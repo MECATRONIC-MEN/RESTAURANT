@@ -31,8 +31,7 @@ function orderBelongsToOpenRegister(order, register, endAt) {
   if (!isPaidRegisterSaleOrder(order) || !register?.opened_at) return false;
   const registerId = String(register.id || '').trim();
   const orderRegisterId = String(order.cash_register_id || '').trim();
-  if (registerId && orderRegisterId === registerId) return true;
-  if (orderRegisterId && registerId && orderRegisterId !== registerId) return false;
+  if (!registerId || orderRegisterId !== registerId) return false;
   const openedMs = parsePosTimestampMs(register.opened_at);
   const endMs = endAt instanceof Date ? endAt.getTime() : parsePosTimestampMs(endAt);
   const eventMs = parsePosTimestampMs(order.paid_at || order.updated_at || order.created_at);
@@ -1339,6 +1338,19 @@ export default function POSPanel() {
       }
       if (posRole === 'admin' && !adminRid) {
         regResolved = null;
+      }
+      if (stationsResEarly != null && regResolved) {
+        const resolvedId = String(regResolved.id || '');
+        const listedOnStation = stationsList.some(
+          (s) => String(s.open_register?.id || '') === resolvedId,
+        );
+        if (!listedOnStation) {
+          regResolved = null;
+          if (posRole === 'admin') {
+            persistAdminRegisterId('');
+            setAdminRegisterId('');
+          }
+        }
       }
 
       const scopedCaja = String(regResolved?.caja_station_id || previewCajaId || '').trim();
@@ -3755,7 +3767,6 @@ export default function POSPanel() {
   const registerSales = Number(register?.total_sales || 0) > 0
     ? Number(register.total_sales || 0)
     : registerLiveSales.total_sales;
-  const todaySales = registerSales;
   const openingAmt = register?.opening_amount || 0;
 
   const saveOpeningAmount = async () => {
@@ -5020,8 +5031,8 @@ export default function POSPanel() {
             <MdAttachMoney className="text-emerald-600 text-xl" />
           </div>
           <div className="min-w-0 text-left">
-            <p className="text-xs leading-tight text-emerald-600">Ventas del día</p>
-            <p className="text-base font-bold text-emerald-700 leading-tight tabular-nums">{formatCurrency(todaySales)}</p>
+            <p className="text-xs leading-tight text-emerald-600">Ventas del turno</p>
+            <p className="text-base font-bold text-emerald-700 leading-tight tabular-nums">{formatCurrency(registerSales)}</p>
           </div>
         </div>
         <button
@@ -6541,7 +6552,7 @@ export default function POSPanel() {
                 </div>
               ) : null}
               <div className="flex flex-wrap lg:flex-nowrap gap-3">
-                <CloseSummaryCard tone="total" label="Ventas del día" amount={registerSales} sub="Métodos activos" />
+                <CloseSummaryCard tone="total" label="Ventas del turno" amount={registerSales} sub="Desde la apertura" />
                 {registerPaymentRows.map((row) => (
                   <CloseSummaryCard
                     key={row.value}
