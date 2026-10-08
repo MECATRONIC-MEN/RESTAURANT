@@ -1339,18 +1339,21 @@ export default function POSPanel() {
       if (posRole === 'admin' && !adminRid) {
         regResolved = null;
       }
-      if (stationsResEarly != null && regResolved) {
-        const resolvedId = String(regResolved.id || '');
-        const listedOnStation = stationsList.some(
-          (s) => String(s.open_register?.id || '') === resolvedId,
-        );
-        if (!listedOnStation) {
-          regResolved = null;
-          if (posRole === 'admin') {
-            persistAdminRegisterId('');
-            setAdminRegisterId('');
-          }
+      if (posRole === 'cajero' && !regResolved) {
+        const mine = stationsList.find((s) => s?.open_register?.id);
+        const op = mine?.open_register;
+        if (op) {
+          regResolved = resolveLiveRegister({
+            id: op.id,
+            caja_station_id: mine.id,
+            user_id: op.user_id,
+            cajero_name: op.cajero_name,
+            opened_at: op.opened_at,
+          });
         }
+      }
+      if (!regResolved && opts.preferRegister) {
+        regResolved = resolveLiveRegister(opts.preferRegister);
       }
 
       const scopedCaja = String(regResolved?.caja_station_id || previewCajaId || '').trim();
@@ -1968,7 +1971,7 @@ export default function POSPanel() {
           ? 'Tu caja ya estaba abierta: ingresaste al turno en curso'
           : `Caja abierta con ${formatCurrency(amount)}`,
       );
-      await loadData();
+      await loadData({ preferRegister: reg });
     } catch (err) { toast.error(err.message); }
     finally { setWorkAreaLoading(false); }
   };
